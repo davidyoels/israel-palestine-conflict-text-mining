@@ -10,94 +10,63 @@ library(dplyr)
 library(stringr)
 library(sentimentr)
 
+source('./helpers.R')
+
+# ------------- Part 1 - Load File to DataFrame -------------
+
 options(stringsAsFactors=FALSE) #Don't treat strings as factors (categories)
 Sys.setlocale('LC_ALL','C')
-
-# An helper function to print corpus rows
-print.corpus <- function(corpus, start=1, end=1){
-  for(i in start:end){
-    print(corpus[[i]][1])
-  }
-}
-
-remove_non_english <- function(corpus) {
-  # Define a regex pattern for English words (a-z and A-Z)
-  pattern <- "^[A-Za-z0-9]+$" ## Need to change this to work for alls
-  
-  # Helper function to clean a single text string
-  clean_text <- function(text) {
-    words <- unlist(strsplit(text[[1]][1], "\\s+"))
-    english_words <- words[grepl(pattern, words)]
-    cleaned_text <- paste(english_words, collapse = " ")
-    return(cleaned_text)
-  }
-  
-  # Apply the cleaning function to each element of the corpus
-  cleaned_corpus <- sapply(corpus, clean_text)
-  return(cleaned_corpus)
-}
-
-# An helper function to remove a given pattern from a text
-removePattern <- function(x, pattern) gsub(x, pattern = pattern, replacement = "")
 
 ipc <- read.csv('files/pse_isr_reddit_comments_min.csv', encoding = 'UTF-8') #Read Sentiment180_2000 csv file.
 ipc.df <- data.frame(doc_id=seq(1:nrow(ipc)),text=ipc$self_text) #Convert "text" column to data frame 
 
-ipc[15,]
+ipc.df[1,]
+
+replace_emoji(ipc.df[23,]$text)
 
 corpus <- VCorpus(DataframeSource(ipc.df)) #Creates a corpus with the data frame created before
 
-custom.stopwords <- c(stopwords("english"),'&gt;','/u/') #Words to remove
+custom.stopwords <- c(stopwords("english"),'&gt;') #Words to remove
 
-urlPattern <- "http\\S*" # URL pattern
-
-removeURL <- function (x) removePattern(x, urlPattern) #Removes all URLs starts with http
-
-# An helper function to clear corpus data
-clean.corpus <- function(corpus){
-  corpus <- tm_map(corpus, content_transformer(tolower)) #lower all texts
-  corpus <- tm_map(corpus, content_transformer(removeURL)) # Remove all the characters after the http
-  corpus <- tm_map(corpus, removeNumbers)
-  corpus <- tm_map(corpus, removeWords, custom.stopwords)
-  corpus <- tm_map(corpus, removePunctuation)
-  corpus <- tm_map(corpus, content_transformer(lemmatize_strings))
-  corpus <- tm_map(corpus, stripWhitespace)
-  # corpus <- remove_non_english(corpus) # Removes non-enlglish words
-  
-  return(corpus)
-}
-
-#-------------- Part 2 -----------------
+# ------------- Part 2 - Clean Data -------------
 
 corpus.cleaned <- clean.corpus(corpus) #Create a cleaned corpus using clean.corpus helper function
 
-corpus.cleaned.df <- as.data.frame(corpus.cleaned)
+# corpus.cleaned <- tm_map(corpus, replace_emoji)
 
-clean.corpus.snt <- function(corpus){
-  corpus <- tm_map(corpus, content_transformer(tolower)) #lower all texts
-  corpus <- tm_map(corpus, content_transformer(removeURL)) # Remove all the characters after the http
-  corpus <- tm_map(corpus, removeNumbers)
-  corpus <- tm_map(corpus, removeWords, custom.stopwords)
-  corpus <- tm_map(corpus, content_transformer(lemmatize_strings))
-  corpus <- tm_map(corpus, stripWhitespace)
-  # corpus <- remove_non_english(corpus) # Removes non-enlglish words
-  
-  return(corpus)
-}
+print.corpus(corpus.cleaned, 1,1)
+print.corpus(corpus.cleaned, 23,23)
+
+hash_sentiment_with_emojies <- sentimentr:::update_polarity_table(lexicon::hash_sentiment_jockers_rinker,
+                                                                  x = data.frame(
+                                                                    words = tolower(lexicon::emojis_sentiment$name),
+                                                                    polarity = lexicon::emojis_sentiment$sentiment,
+                                                                    stringsAsFactors = FALSE
+                                                                  )
+)
+
+replace_emoji("😂")
+
+emojis_sentiment[lexicon::emojis_sentiment$name=="face with tears of joy",]
+
+hash_sentiment_with_emojies[hash_sentiment_with_emojies$x == "face with tears of joy"]
 
 corpus.cleaned.sen<-clean.corpus.snt(corpus)
 corpus_contents <- lapply(corpus.cleaned.sen, as.character)
-corpus.cleaned.sntr<-sentiment_by(unlist(corpus_contents)) #Calculate the average polarity of each comment
+corpus.cleaned.sntr<-sentiment_by(unlist(corpus_contents), polarity_dt = hash_sentiment_with_emojies) #Calculate the average polarity of each comment
+
+# ------------- Part 3 - Sentiment Analysis -------------
 
 corpus.df.sntr<-data.frame(sentiment=corpus.cleaned.sntr$ave_sentiment,content=ipc$self_text,
                            filtered_content=unlist(corpus_contents))
 
+lexicon::hash_sentiment_jockers_rinker[c("skull")]
 lexicon::hash_sentiment_jockers_rinker[c("starve","hoard","shoot", "aid","food")]
 lexicon::hash_sentiment_jockers_rinker[c("tears")]
 lexicon::hash_sentiment_huliu[c("only")]
 
-
 ipc$sentiment<-corpus.cleaned.sntr$ave_sentiment
+library(emoji)
 
 ipc.pos<-ipc[ipc$sentiment > 0, "self_text"] # Positive comments
 ipc.neg<-ipc[ipc$sentiment < 0, "self_text"] # Negative comments
@@ -106,15 +75,6 @@ ipc.pos.vec<-paste(ipc.pos, collapse=" ") # Concatenate all positive comments
 ipc.neg.vec<-paste(ipc.neg, collapse=" ") # Concatenate all negative comments
 
 ipc.all<-c(ipc.pos.vec,ipc.neg.vec) # Creates a vector with positive and negative comments
-
-#'@description Vector clean function. Uses the `clean.vec` clean function defined in the beginning
-clean.corpus.all<-function(corpus){
-  corpus<-clean.corpus(corpus)
-  corpus <- tm_map(corpus, removePunctuation)
-  corpus <- tm_map(corpus, stripWhitespace)
-  
-  return(corpus)
-}
 
 # Create the corpus (vector source) with two documents
 ipc.all.all.corpus <- VCorpus(VectorSource(ipc.all))
@@ -136,7 +96,8 @@ set.seed(1)
 comparison.cloud(tdm.all.m, max.words = 50, random.order=FALSE,title.size = 1, #random.order=FALSE keeps the list ordered by frequency
                  colors=brewer.pal(ncol(tdm.all.m), "Dark2")) #number of colors just like the number of different documents we compare
 
-#------------------ Graphics ------------------
+
+#------------------ Part 4 - Data Visualization ------------------
 library(qdap)
 library(ggplot2)
 library(ggthemes) 
@@ -159,8 +120,6 @@ freq.df<-data.frame(word=names(term.freq),frequency=term.freq)
 #sort by frequency
 freq.df<-freq.df[order(freq.df[,2], decreasing=T),] 
 head(freq.df,10)
-
-######################Visualizations##############################
 
 ############### create a word frequency bar plot
 #convert the unique words from a string to a factor with unique levels
@@ -198,13 +157,7 @@ display.brewer.all()#display color sets
 
 wordcloud(freq.df$word,freq.df$frequency, max.words = 50,random.order = FALSE, colors=brewer.pal(8,"Dark2"), rot.per = 0.2, scale=c(3.5,0.25)) # color set, and 90 degree proportion 
 
-
-
-
-
-
-
-# ----------- Topic Modeling ---------------
+# ----------- Part 5 - Topic Modeling ---------------
 library(ldatuning)
 library(LDAvis)
 library(servr)
@@ -230,3 +183,51 @@ result <- FindTopicsNumber(
 )
 
 FindTopicsNumber_plot(result)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+replace_emoji("💀")
+
+
+replace_emoji("😂😂")
+
+nrc_sentiments <- get_sentiments("nrc")
+dfasd<-sentimentr_data("hash_sentiment_emojis")
+
+lexicon::hash_emojis_identifier[x='<U+0001F480>',]
+
+lexicon::hash_emojis
+
+ls("package:lexicon")
+
+head(hash_sentiment_emojis)
+ls("package:sentimentr")
+
+
+
+
+
