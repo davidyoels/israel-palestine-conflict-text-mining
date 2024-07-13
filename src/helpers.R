@@ -1,3 +1,10 @@
+custom.stopwords <- c(stopwords("english"),'&gt;',"like","can","make","just","say","one","will",
+                      "think","know","also","get", "want", "see","use","take","happen", "way",
+                      "give","try","now","thing", "comment", "year","say", "GMT","“","’"
+                      ,"they", "are", "into","the", "have", "question", "coldplay",
+                      "point","base","rule","bot","post","allow",
+                      "automatically", "gt;") #Words to remove
+
 # An helper function to print corpus rows
 print.corpus <- function(corpus, start=1, end=1){
   for(i in start:end){

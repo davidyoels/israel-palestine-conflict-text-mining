@@ -9,7 +9,6 @@ set.seed(123)
 library(stringi)
 library(stringr) 
 library(tm)
-library(stringi)
 library(textstem)
 library(ggplot2)
 library(ggthemes)
@@ -19,6 +18,7 @@ library(sentimentr)
 library(topicmodels)
 library(wordcloud)
 library(ldatuning)
+library(emoji)
 
 # read csv
 ipc.df<-read.csv('./files/pse_isr_reddit_comments_min.csv', encoding = 'UTF-8') #read the csv file
@@ -36,10 +36,8 @@ removePattern <- function(x, pattern) gsub(x, pattern = pattern, replacement = "
 urlPattern <- "http\\S*" # URL pattern
 removeURL <- function (x) removePattern(x, urlPattern) # Removes all URLs starts with http
 
-custom.stopwords <- c(stopwords("english"),'&gt;',"like","can","make","just","say","one","will",
-                      "think","know","also","get", "want", "see","use","take","happen", "way",
-                      "give","try","now","thing", "comment", "year","say", "GMT",
-                      "they", "are", "into","the", "have", "question", "automatically", "gt;") #Words to remove
+symbols_to_remove <- c("“", "”", "'", "’")
+
 
 clean.corpus <- function(corpus){
   corpus <- tm_map(corpus, content_transformer(tolower)) #lower all texts
@@ -62,6 +60,9 @@ print.corpus <- function(corpus, start=1, end=1){
 ipc.corpus.cln<-clean.corpus(ipc.corpus)
 ipc.corpus.cln.df <- data.frame(text=unlist(sapply(ipc.corpus.cln, `[`, "content")), 
                                        stringsAsFactors=F)
+
+ipc.corpus.cln.df$original_text <- ipc.df$self_text
+
 
 print.corpus(ipc.corpus.cln,1,3)
 
@@ -122,8 +123,33 @@ wordcloud(freq.df$word,freq.df$frequency, max.words = 50,random.order = FALSE,
           colors=brewer.pal(8,"Dark2"), rot.per = 0.2, scale=c(3.5,0.25)) # color set, and 90 degree proportion 
 
 
+# ------------ Sentiment Analysis --------------
+
+hash_sentiment_with_emojies <- sentimentr:::update_polarity_table(lexicon::hash_sentiment_jockers_rinker,
+                                                                  x = data.frame(
+                                                                    words = tolower(lexicon::emojis_sentiment$name),
+                                                                    polarity = lexicon::emojis_sentiment$sentiment,
+                                                                    stringsAsFactors = FALSE
+                                                                  )
+)
+
+replace_emoji_underscore<-function(vec){
+  replace_emoji(vec,emoji_dt = hash_emoji_underscore)
+}
+
+remove_symbols <- function(text_corpus, symbols_to_remove = c("“", "”", "'", "’", "$", "%", "@", "&")) {
+  clean_corpus <- gsub(paste0("[", paste0(symbols_to_remove, collapse = ""), "]"), "", text_corpus, perl = TRUE)
+  
+  return(clean_corpus)
+}
+
+replace_emojies_identifier <- function(txt){
+  replace_emoji(txt, emoji_dt = lexicon::hash_emojis_identifier)
+}
+
 clean.corpus.snt <- function(corpus){
-  # corpus <- tm_map(corpus, content_transformer(replace_emoji)) 
+  corpus <- tm_map(ipc.corpus, content_transformer(remove_symbols))
+  corpus <- tm_map(corpus, content_transformer(replace_emojies_identifier))
   corpus <- tm_map(corpus, removeWords, custom.stopwords)
   corpus <- tm_map(corpus, content_transformer(tolower)) #lower all texts
   corpus <- tm_map(corpus, content_transformer(removeURL)) # Remove all the characters after the http
@@ -135,15 +161,21 @@ clean.corpus.snt <- function(corpus){
   return(corpus)
 }
 
-hash_sentiment_with_emojies <- sentimentr:::update_polarity_table(lexicon::hash_sentiment_jockers_rinker,
-                                                                  x = data.frame(
-                                                                    words = tolower(lexicon::emojis_sentiment$name),
-                                                                    polarity = lexicon::emojis_sentiment$sentiment,
-                                                                    stringsAsFactors = FALSE
-                                                                  )
-)
+protect_emojis <- function(text) {
+  emoji_terms <- c("face with tears of joy", "another emoji term")  # Add other emoji terms as needed
+  for (term in emoji_terms) {
+    text <- gsub(term, paste0("[[", term, "]]"), text)
+  }
+  return(text)
+}
 
-replace_emoji("😂")
+restore_emojis <- function(text) {
+  text <- gsub("\\[\\[", "", text)
+  text <- gsub("\\]\\]", "", text)
+  return(text)
+}
+
+replace_emoji_underscore("😂")
 
 lexicon::emojis_sentiment[lexicon::emojis_sentiment$name=="face with tears of joy",]
 
@@ -156,17 +188,88 @@ ipc.corpus.cln.sen.df <- data.frame(text=unlist(sapply(ipc.corpus.cln.sen, `[`, 
 
 ipc.corpus.sntr<-sentiment_by(unlist(corpus_contents), polarity_dt = hash_sentiment_with_emojies) #Calculate the average polarity of each comment
 
+
+
+
+ipc.corpus.cln.sen.df <- data.frame(text=unlist(sapply(ipc.corpus, `[`, "content")),
+                                    originalText=ipc.df$self_text,
+                                    stringsAsFactors=F)
+
+
+
+ipc.corpus.cln.sen <- tm_map(ipc.corpus, content_transformer(remove_symbols))
+ipc.corpus.cln.sen.df <- data.frame(text=unlist(sapply(ipc.corpus.cln.sen, `[`, "content")),
+                                    originalText=ipc.df$self_text,
+                                    stringsAsFactors=F)
+
+ipc.corpus.cln.sen <- tm_map(ipc.corpus.cln.sen, content_transformer(replace_emojies_identifier))
+ipc.corpus.cln.sen.df <- data.frame(text=unlist(sapply(ipc.corpus.cln.sen, `[`, "content")),
+                                    originalText=ipc.df$self_text,
+                                    stringsAsFactors=F)
+
+ipc.corpus.cln.sen <- tm_map(ipc.corpus.cln.sen, content_transformer(tolower)) #lower all texts
+ipc.corpus.cln.sen.df <- data.frame(text=unlist(sapply(ipc.corpus.cln.sen, `[`, "content")), 
+                                    originalText=ipc.df$self_text,
+                                    stringsAsFactors=F)
+
+ipc.corpus.cln.sen <- tm_map(ipc.corpus.cln.sen, content_transformer(removeURL)) # Remove all the characters after the http
+ipc.corpus.cln.sen.df <- data.frame(text=unlist(sapply(ipc.corpus.cln.sen, `[`, "content")), 
+                                    originalText=ipc.df$self_text,
+                                    stringsAsFactors=F)
+
+ipc.corpus.cln.sen <- tm_map(ipc.corpus.cln.sen, removeWords, custom.stopwords)
+ipc.corpus.cln.sen.df <- data.frame(text=unlist(sapply(ipc.corpus.cln.sen, `[`, "content")), 
+                                    originalText=ipc.df$self_text,
+                                    stringsAsFactors=F)
+
+ipc.corpus.cln.sen <- tm_map(ipc.corpus.cln.sen, removeNumbers)
+ipc.corpus.cln.sen.df <- data.frame(text=unlist(sapply(ipc.corpus.cln.sen, `[`, "content")), 
+                                    originalText=ipc.df$self_text,
+                                    stringsAsFactors=F)
+
+ipc.corpus.cln.sen <- tm_map(ipc.corpus.cln.sen, content_transformer(lemmatize_strings))
+ipc.corpus.cln.sen.df <- data.frame(text=unlist(sapply(ipc.corpus.cln.sen, `[`, "content")),
+                                    originalText=ipc.df$self_text,
+                                    stringsAsFactors=F)
+
+
+ipc.corpus.cln.sen <- tm_map(ipc.corpus.cln.sen, stripWhitespace)
+ipc.corpus.cln.sen.df <- data.frame(text=unlist(sapply(ipc.corpus.cln.sen, `[`, "content")), 
+                                    originalText=ipc.df$self_text,
+                                    stringsAsFactors=F)
+
+# vec <- stri_trans_general(sapply(ipc.corpus, as.character),"Latin-ASCII")
+# ipc.corpus.cln.sen.df <- data.frame(text=vec, 
+#                                     originalText=ipc.df$self_text,
+#                                     stringsAsFactors=F)
+
+
+lexicon::emojis_sentiment
+
+hash_sentiment_with_emojies <- sentimentr:::update_polarity_table(lexicon::hash_sentiment_jockers_rinker,
+                                                                  x = data.frame(
+                                                                    words = lexicon::emojis_sentiment$id,
+                                                                    polarity = lexicon::emojis_sentiment$sentiment,
+                                                                    stringsAsFactors = FALSE
+                                                                  )
+)
+
+hash_sentiment_with_emojies[hash_sentiment_with_emojies$x == "lexiconwcaiviebiytolowkanmb"]
+
+ipc.corpus.sntr<-sentiment_by(unlist(ipc.corpus.cln.sen.df$text), polarity_dt = hash_sentiment_with_emojies) #Calculate the average polarity of each comment
+
+
+
 # ------------- Part 3 - Sentiment Analysis -------------
 
 ipc.corpus.sntr.df<-data.frame(sentiment=ipc.corpus.sntr$ave_sentiment,content=ipc.df$self_text,
-                           filtered_content=unlist(corpus_contents))
+                           filtered_content=ipc.corpus.cln.sen.df$text)
 
 lexicon::hash_sentiment_jockers_rinker[c("skull")]
 lexicon::hash_sentiment_jockers_rinker[c("starve","hoard","shoot", "aid","food")]
 lexicon::hash_sentiment_jockers_rinker[c("tears")]
 lexicon::hash_sentiment_huliu[c("only")]
 
-library(emoji)
 
 ipc.df$sentiment<-corpus.cleaned.sntr$ave_sentiment
 
